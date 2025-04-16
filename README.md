@@ -1,7 +1,7 @@
 # 제품 맞춤형 QA 챗봇 서비스
 
 <p align="center">
-  <img src="./readimg/main_page.png" width="" alt="main_page"/>
+  <img src="./readimg/main_page.png" width="600" alt="main_page"/>
 </p>
 
 SSAFY 관통 프로젝트 - 제품 설명서 기반 맞춤형 QA 챗봇 시스템 개발  
@@ -103,7 +103,7 @@ $ npm run dev
 
 |                          QA 화면(Naive Mode)                           |                             QA 화면(Assistant Mode)                             |
 | :--------------------------------------------------------------------: | :-----------------------------------------------------------------------------: |
-| <img src="./readimg/naive_mode.png" height="300px" title="main_page"/> | <img src="./readimg/assistant_mode.png" height="300px" title="assistant_mode"/> |
+| <img src="./readimg/naive_mode.png" height="400px" title="main_page"/> | <img src="./readimg/assistant_mode.png" height="400px" title="assistant_mode"/> |
 
 ## 주요 기능
 
