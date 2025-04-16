@@ -1,71 +1,181 @@
+# 제품 맞춤형 QA 챗봇 서비스
 
-# 제품 매뉴얼 데이터 기반 QA 챗봇 서비스
+<p align="center">
+  <img src="./readimg/main_page.png" width="" alt="main_page"/>
+</p>
+
+SSAFY 관통 프로젝트 - 제품 설명서 기반 맞춤형 QA 챗봇 시스템 개발  
+개발 기간 : 2024/11/18 ~ 2024/11/26 (약 2주)
 
 ## 프로젝트 소개
-> - 제품 매뉴얼 PDF 데이터를 수집하고 정제하여 대규모 QA 데이터셋을 구축하고 이를 바탕으로 RAG(Retrieval-Augmented Generation) 기반의 **QA 챗봇 프로젝트**
-> - 사용자의 질문을 분석하고, 제품 데이터베이스를 바탕으로 사용자가 찾고자하는 정보를 정확하고 신속하게 제공
 
-## 사용법
-1. 서비스 링크에 접속합니다
-2. 하단에 있는 질문 입력 박스를 클릭하여 삼성 전자기기 제품에 대한 궁금한 점들을 입력합니다
-3. 우측 하단 Send 버튼 좌측에 있는 선택창을 클릭하여 Assitant를 선택한 후 Send버튼을 클릭합니다
-4. 챗봇이 질문을 분석하여 질문에 맞는 답변을 QA 데이터셋을 바탕으로 실시간으로 응답을 제공합니다
+본 프로젝트는 AI 기반의 자연어 처리 기술을 활용하여, 방대한 제품 매뉴얼로부터 사용자가 원하는 정보를 쉽고 빠르게 제공하는 제품 맞춤형 QA 챗봇 서비스입니다.
 
-## 배포된 링크
-[QA 챗봇 서비스 링크](https://d10ek5tvv5syc7.cloudfront.net/)
-## 로컬 실행 방법
-### 1. 레포지토리 클론
+기존 FAQ의 한계를 보완하여, 사용자의 질문에 실시간으로 관련 매뉴얼 정보를 탐색하고 정제된 답변을 제공합니다.
+
+### 배포 주소
+
+개발 버전: `배포 X`<br>
+Frontend 서버: `배포 X`<br>
+Backend 서버: `https://ssafy-2024-backend-dry-star-6304.fly.dev`<br>
+
+### 팀 소개
+
+| 이름   | 역할            | GitHub 링크                                | 비고                           |
+| ------ | --------------- | ------------------------------------------ | ------------------------------ |
+| 김찬호 | 프론트엔드 개발 | [@nonamed19](https://github.com/nonamed19) | Tailwind 기반 UI 구성          |
+| 김지승 | 백엔드 개발     |                                            | FastAPI / LangChain / Pinecone |
+| 우성문 | 데이터 처리     |                                            | QA Pair 생성 및 품질 평가      |
+| 안정길 | AI 응답 모델링  |                                            | Upstage 모델 fine-tune         |
+
+---
+
+## 시작 가이드
+
+### Requirements
+
+For building and running the application you need:
+
+```
+- Python 3.9.13
+- Node.js LTS (16+)
+- FastAPI
+- OpenAI API Key
+- Pinecone API Key
+- Upstage API Key
+```
+
+### Installation
+
 ```bash
-git clone https://github.com/ssafy-12-data-3/project.git
+$ git clone https://github.com/nonamed19/Chatbot_Service_Manual_Based.git
+$ cd qa-chatbot-service
 ```
 
-### 2. 필수 환경 설정 파일 생성
-프로젝트 실행에 필요한 환경 변수를 저장학 위해 아래 경로에 .env 파일을 생성
-- 백엔드 환경 설정: src/backend/.env
-- 프론트엔드 환경 설정: src/frontend/.env.development
+#### Backend
 
-**백엔드 (src/backend/.env):**
-```
-OPENAI_API_KEY= {https://platform.openai.com/api-keys 사이트에서 발급받은 API key}
-PINECONE_API_KEY= {https://www.pinecone.io/ 사이트에서 발급받은 API key}
-ASSISTANT_BOT_ID= {https://platform.openai.com/playground/assistants 사이트에서 학습시킨 Assistants의 id}
-UPSTAGE_API_KEY= {https://she11.tistory.com/252 사이트 참고해서 받은 API key}
-```
-
-**프로트앤드 (src/frontend/.env.development):**
-```
-API_ENDPOINT=http://localhost:8000
-```
-
-### 3. 백앤드 의존성 설치 및 로컬에 서버 배포
-src/backend/ 로 경로 이동후 아래 명령어 순서대로 실행
 ```bash
-pip install -r requirements.txt
-python app.py
+$ cd backend
+$ python -m venv venv
+$ source venv/bin/activate
+$ pip install -r requirements.txt
+$ uvicorn app:app --reload
 ```
-로컬에 배포 후 http://localhost:8000/docs 경로로 접속해 잘 배포되었는지 확인
 
-### 4. 프로트앤드 의존성 설치 및 로컬에 서버 배포
-window 환경에서는 git bash에서 실행
-parcel 설치 후 package.json에 정의된 모든 의존성 설치
+#### Frontend
+
 ```bash
-npm install -g parcel
-npm install
-npm start
+$ cd ../frontend
+$ npm install
+$ npm run dev
 ```
-프론트 서버 로컬에 배포 후 배포된 서버에서 서비스 이용해보기
 
+## 기술 스택
 
-### 5. 서비스 확인인
-`http://localhost:1234/`에 접속하여 QA 챗봇 이용하기
-``` 질문 리스트
-"삼성 키보드에서 예측 텍스트 및 자동 수정 기능을 사용하는 방법은 무엇인가요?"
+### Environment
 
-"모바일 핫스팟에서 Wi-Fi 공유를 어떻게 활성화할 수 있나요?"
+- OS: Windows
+- Backend : Django
+- Frontend : JavaScript
+- API : OpenAI Assistant API
 
-"갤럭시 A356B/DS에서 휴지통 기능을 사용하는 방법은 무엇인가요?"
+### Config
 
-"배경 이미지를 변경하려면 어떻게 해야 하나요?"
+- Upstage Solar LLM : Few-shot QA 생성, 카테고리 분류, 데이터 품질 평가 및 보완
+- Pinecone : 벡터 검색(MMR, similarity), 대규모 검색 최적화
+- LangChain : 체인 생성, 검색 기반 응답 구성(RAG), 프롬프트 템플릿화
+- Selenium : 웹 크롤링, 자동화된 클릭/스크롤, PDF 링크 수집
+- Fly.io : Edge 지역 분산 호스팅, 자동 HTTPS, CLI 기반 배포
 
-"Samsung Notes에서 노트를 정렬하는 방법은 무엇인가요?"
+### Development
+
+- Backend: Django + FastAPI + LangChain + Upstage Chat + OpenAI API
+- Frontend: Vanilla JS + TailwindCSS + Parcel
+- DB : Pinecone, AWS Lambda
+
+### Communication
+
+- GitHub
+- GitLab
+- Notion
+
+## 화면 구성
+
+|                          QA 화면(Naive Mode)                           |                             QA 화면(Assistant Mode)                             |
+| :--------------------------------------------------------------------: | :-----------------------------------------------------------------------------: |
+| <img src="./readimg/naive_mode.png" height="300px" title="main_page"/> | <img src="./readimg/assistant_mode.png" height="300px" title="assistant_mode"/> |
+
+## 주요 기능
+
+- 사용자 질문에 맞춘 제품 정보 실시간 제공
+- QA Pair 데이터셋 기반 챗봇 학습 및 개선
+- IndexedDB 기반 대화 저장 및 로컬 기록 관리
+- OpenAI Assistant API 및 LangChain 기반 MMR 검색 기능 제공
+- Pinecone 벡터 저장소를 활용한 유사도 검색
+
+## 아키텍쳐
+
+### Data Flow
+
 ```
+1. 삼성 갤럭시 PDF 매뉴얼 수집 (Selenium)
+2. Upstage Document Parser → Markdown 변환
+3. 텍스트 정제 및 QA Pair 생성 (Solar LLM)
+4. Pinecone에 임베딩 저장 (MMR 기반 검색)
+5. LangChain RetrievalQA → 사용자 질문 대응
+```
+
+## 데이터 통계
+
+### 데이터셋 구조
+
+![data_structure](./readimg/data_structure.png)
+
+```
+질문, 답변, 분류를 기준으로 데이터 셋 구축
+Upstage Solar LLM을 이용해 20개 데이터의 QA Pair 생성
+QA 데이터셋 품질 평가는 Randome sampling으로 200건을 추출하여 Hallucination, Answer Relevancy, Toxicity를 활용해 정량적 평가
+전체 데이터 셋 중 일부를 추출해 연관성, 불용어, 정확성 등을 기준으로 평가 실시
+```
+
+## 품질 평가 및 성과
+
+### Metric Score
+
+|  품질 평가 기준  | 평가 결과 |
+| :--------------: | :-------: |
+|  Hallucination   |    93%    |
+| Answer Relevancy |    95%    |
+|     Toxicity     |   100%    |
+
+### 카테고리 별 성공률 시각화
+
+|  품질 평가 기준   | 평가 결과 |
+| :---------------: | :-------: |
+|     문제 해결     |   100%    |
+| 제품 사용법 이해  |    90%    |
+| 정보 탐색 및 선택 |    83%    |
+
+### 평가 결과
+
+전반적인 데이터 품질 현황
+
+- 전체적인 성공률이 70~100% 범위로 기본적인 품질 수준 확보
+- Toxicity(~100%)와 Answer relevancy(~95%) 지표는 우수한 성과
+- Hallucination(~93%) 지표가 상대적 취약점으로 파악
+
+제품군별 특성
+
+- Galaxy Note Series: 가장 높은 품질 수준(성공률 ~100%)
+- Galaxy S Series: 품질 편차가 크며, 특히 Galaxy A11|A12 모델에서 개선 필요
+- Galaxy A Series: 품질 편차가 크며, 특히 Galaxy S20 모델에서 개선 필요
+- Wearable/IoT 기기: 높은 수준의 품질 수준(성공률 ~95%)
+
+## 기타 추가 사항들
+
+향후 계획 :
+
+- 자동화된 품질 검증 시스템 구축
+- 제품별 맞춤형 챗봇 튜닝
+- Serverless 기반 성능 최적화
+- 사용자 피드백 기반 정기적 개선 루프 도입
