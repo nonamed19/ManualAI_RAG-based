@@ -4,7 +4,7 @@
   <img src="./readimg/main_page.png" width="600" alt="main_page"/>
 </p>
 
-SSAFY 관통 프로젝트 - 제품 설명서 기반 맞춤형 QA 챗봇 시스템 개발  
+SSAFY DATA 프로젝트 - 제품 설명서 기반 맞춤형 QA 챗봇 시스템 개발  
 개발 기간 : 2024/11/18 ~ 2024/11/26 (약 2주)
 
 ## 프로젝트 소개
