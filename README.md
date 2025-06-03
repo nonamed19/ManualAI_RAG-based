@@ -15,8 +15,8 @@ SSAFY DATA 프로젝트 : 제품 매뉴얼 데이터셋을 통한 RAG 기반 QA 
 
 ### 배포 주소
 
-개발 버전: `배포 X`<br>
-Frontend 서버: `배포 X`<br>
+개발 버전: `https://main.d3uk3ibomzwwiv.amplifyapp.com/`<br>
+Frontend 서버: `http://localhost:1234/`<br>
 Backend 서버: `https://ssafy-2024-backend-dry-star-6304.fly.dev`<br>
 
 ### 팀 소개
