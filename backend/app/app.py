@@ -1,53 +1,76 @@
 import os
+from pathlib import Path
 from typing import List, Optional
-from openai import AsyncOpenAI
+
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chains import RetrievalQA
-from langchain_pinecone import PineconeVectorStore
-from langchain_upstage import ChatUpstage
-from langchain_upstage import UpstageEmbeddings
-from pinecone import Pinecone, ServerlessSpec
+from langchain_community.vectorstores import FAISS
+from langchain_upstage import ChatUpstage, UpstageEmbeddings
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 load_dotenv()
 
-# upstage models
+BASE_DIR = Path(__file__).resolve().parent.parent
+VECTORSTORE_DIR = BASE_DIR / "data" / "vectorstore"
+
 chat_upstage = ChatUpstage()
 embedding_upstage = UpstageEmbeddings(model="embedding-query")
 
-openai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-assistant_bot_id = os.environ.get("ASSISTANT_BOT_ID")
-pinecone_api_key = os.environ.get("PINECONE_API_KEY")
-pc = Pinecone(api_key=pinecone_api_key)
-index_name = "galaxy-a35"
+openai_api_key = os.getenv("OPENAI_API_KEY")
+openai_client = AsyncOpenAI(api_key=openai_api_key) if openai_api_key else None
+assistant_bot_id = os.getenv("ASSISTANT_BOT_ID")
 
-# create new index
-if index_name not in pc.list_indexes().names():
-    pc.create_index(
-        name=index_name,
-        dimension=4096,
-        metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
-    )
-
-pinecone_vectorstore = PineconeVectorStore(index=pc.Index(index_name), embedding=embedding_upstage)
-
-pinecone_retriever = pinecone_vectorstore.as_retriever(
-    search_type='mmr',  # default : similarity(유사도) / mmr 알고리즘
-    search_kwargs={"k": 3}  # 쿼리와 관련된 chunk를 3개 검색하기 (default : 4)
-)
+qa_chain: Optional[RetrievalQA] = None
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:1234",
+        "http://127.0.0.1:1234",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def build_qa_chain() -> RetrievalQA:
+    if not VECTORSTORE_DIR.exists():
+        raise FileNotFoundError(
+            f"Vector store not found at '{VECTORSTORE_DIR}'. Run backend/app/embed.py first."
+        )
+
+    vectorstore = FAISS.load_local(
+        str(VECTORSTORE_DIR),
+        embedding_upstage,
+        allow_dangerous_deserialization=True,
+    )
+    retriever = vectorstore.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": 3},
+    )
+    return RetrievalQA.from_chain_type(
+        llm=chat_upstage,
+        chain_type="stuff",
+        retriever=retriever,
+        return_source_documents=False,
+    )
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    global qa_chain
+    try:
+        qa_chain = build_qa_chain()
+    except FileNotFoundError:
+        qa_chain = None
 
 
 class ChatMessage(BaseModel):
@@ -64,60 +87,63 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]  # Entire conversation for naive mode
 
 
-class MessageRequest(BaseModel):
-    message: str
-
-
 @app.post("/chat")
 async def chat_endpoint(req: ChatRequest):
     user_message = next(
-        (msg.content for msg in req.messages if msg.role == "user"), 
-        None
+        (msg.content.strip() for msg in reversed(req.messages) if msg.role == "user" and msg.content.strip()),
+        None,
     )
-    
+
     if not user_message:
-        return {"error": "No user message provided in the request."}
+        raise HTTPException(status_code=400, detail="No user message provided in the request.")
 
-    qa = RetrievalQA.from_chain_type(llm=chat_upstage,
-                                     chain_type="stuff",
-                                     retriever=pinecone_retriever,
-                                     return_source_documents=True)
+    if qa_chain is None:
+        raise HTTPException(status_code=503, detail="QA chain is not initialized.")
 
-    result = qa(user_message)
-    return {"reply": result['result']}
+    try:
+        result = qa_chain.invoke({"query": user_message})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate response: {exc}") from exc
+
+    return {"reply": result.get("result", "")}
 
 
 @app.post("/assistant")
 async def assistant_endpoint(req: AssistantRequest):
-    assistant = await openai.beta.assistants.retrieve(assistant_bot_id)
+    if not openai_client or not assistant_bot_id:
+        raise HTTPException(
+            status_code=503,
+            detail="Assistant mode is disabled. Set OPENAI_API_KEY and ASSISTANT_BOT_ID.",
+        )
+
+    assistant = await openai_client.beta.assistants.retrieve(assistant_bot_id)
 
     if req.thread_id:
         # We have an existing thread, append user message
-        await openai.beta.threads.messages.create(
+        await openai_client.beta.threads.messages.create(
             thread_id=req.thread_id, role="user", content=req.message
         )
         thread_id = req.thread_id
     else:
         # Create a new thread with user message
-        thread = await openai.beta.threads.create(
+        thread = await openai_client.beta.threads.create(
             messages=[{"role": "user", "content": req.message}]
         )
         thread_id = thread.id
 
     # Run and wait until complete
-    await openai.beta.threads.runs.create_and_poll(
+    await openai_client.beta.threads.runs.create_and_poll(
         thread_id=thread_id, assistant_id=assistant.id
     )
 
     # Now retrieve messages for this thread
     # messages.list returns an async iterator, so let's gather them into a list
     all_messages = [
-        m async for m in openai.beta.threads.messages.list(thread_id=thread_id)
+        m async for m in openai_client.beta.threads.messages.list(thread_id=thread_id)
     ]
-    print(all_messages)
 
     # The assistant's reply should be the last message with role=assistant
-    assistant_reply = all_messages[0].content[0].text.value
+    assistant_reply = all_messages[0].content[0].text.value if all_messages else ""
 
     return {"reply": assistant_reply, "thread_id": thread_id}
 

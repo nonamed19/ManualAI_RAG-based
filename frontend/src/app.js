@@ -6,7 +6,7 @@ const userInput = document.getElementById("user-input");
 const apiSelector = document.getElementById("api-selector");
 const newChatBtn = document.getElementById("new-chat-btn");
 
-const BASE_URL = process.env.API_ENDPOINT;
+const BASE_URL = process.env.API_ENDPOINT || "http://127.0.0.1:8000";
 
 let db;
 
@@ -153,7 +153,6 @@ async function getAssistantResponse(userMessage) {
     const messagesForAPI = [
       { role: "system", content: "You are a helpful assistant." },
       ...allMsgs.map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content: userMessage },
     ];
     payload = { messages: messagesForAPI };
     url = `${BASE_URL}/chat`;
@@ -169,7 +168,8 @@ async function getAssistantResponse(userMessage) {
   });
 
   if (!response.ok) {
-    throw new Error("Network response was not ok");
+    const errorText = await response.text();
+    throw new Error(`Request failed (${response.status}): ${errorText}`);
   }
 
   const data = await response.json();
