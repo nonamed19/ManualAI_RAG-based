@@ -375,3 +375,6 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,visualstudiocode
 
+# Runtime answer-quality feedback (contains production usage signals)
+backend/data/feedback.jsonl
+

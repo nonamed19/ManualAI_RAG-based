@@ -12,6 +12,7 @@ const apiStatusDot = document.getElementById("api-status-dot");
 const apiStatusText = document.getElementById("api-status-text");
 const ragStatus = document.getElementById("rag-status");
 const assistantStatus = document.getElementById("assistant-status");
+const feedbackStatus = document.getElementById("feedback-status");
 const welcomeEyebrow = document.getElementById("welcome-eyebrow");
 const welcomeTitle = document.getElementById("welcome-title");
 const welcomeDescription = document.getElementById("welcome-description");
@@ -61,10 +62,10 @@ function getMetadata(key) {
     request.onerror = () => reject(request.error);
   });
 }
-function saveMessage(role, content, mode) {
+function saveMessage(role, content, mode, extra = {}) {
   return runTransaction("chats", "readwrite", tx => {
     const store = tx.objectStore("chats");
-    store.add({ role, content, mode, createdAt: Date.now() });
+    store.add({ role, content, mode, createdAt: Date.now(), ...extra });
     const countRequest = store.count();
     countRequest.onsuccess = () => {
       let excess = countRequest.result - MAX_STORED_MESSAGES;
@@ -81,6 +82,25 @@ function getAllMessages() {
     request.onerror = () => reject(request.error);
   });
 }
+function saveFeedbackRating(requestId, rating) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("chats", "readwrite");
+    const store = transaction.objectStore("chats");
+    const cursorRequest = store.openCursor();
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      if (cursor.value.requestId === requestId) {
+        cursor.update({ ...cursor.value, feedbackRating: rating });
+        return;
+      }
+      cursor.continue();
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
 function clearAllData() { return runTransaction(["chats", "metadata"], "readwrite", tx => { tx.objectStore("chats").clear(); tx.objectStore("metadata").clear(); }); }
 
 function setStatus(message = "", loading = false) { statusMessage.textContent = message; statusMessage.classList.toggle("loading", loading); }
@@ -88,7 +108,7 @@ function scrollToBottom() { requestAnimationFrame(() => { conversation.scrollTop
 function autoResize() { userInput.style.height = "auto"; userInput.style.height = `${Math.min(userInput.scrollHeight, 144)}px`; }
 function formatTime(timestamp = Date.now()) { return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(timestamp); }
 
-function createMessageBubble(content, role = "user", { isError = false, isTyping = false, createdAt, mode = activeMode } = {}) {
+function createMessageBubble(content, role = "user", { isError = false, isTyping = false, createdAt, mode = activeMode, sources = [], requestId, feedbackRating } = {}) {
   const article = document.createElement("article");
   article.className = `message ${role}${isError ? " error" : ""}${isTyping ? " typing" : ""}`;
   const avatar = document.createElement("div");
@@ -110,6 +130,26 @@ function createMessageBubble(content, role = "user", { isError = false, isTyping
     bubble.innerHTML = "<span></span><span></span><span></span>";
   } else bubble.textContent = content;
   contentBox.append(meta, bubble);
+  if (role === "assistant" && !isTyping && !isError && sources.length) {
+    const citations = document.createElement("details");
+    citations.className = "citations";
+    const summary = document.createElement("summary");
+    summary.textContent = `매뉴얼 근거 ${sources.length}개 보기`;
+    const sourceList = document.createElement("div");
+    sourceList.className = "source-list";
+    sources.forEach(source => {
+      const item = document.createElement("div");
+      item.className = "source-item";
+      const title = document.createElement("strong");
+      title.textContent = source.page ? `${source.title} · ${source.page}쪽` : source.title;
+      const excerpt = document.createElement("p");
+      excerpt.textContent = source.excerpt || "관련 매뉴얼 내용을 참고했습니다.";
+      item.append(title, excerpt);
+      sourceList.append(item);
+    });
+    citations.append(summary, sourceList);
+    contentBox.append(citations);
+  }
   if (role === "assistant" && !isTyping && !isError) {
     const actions = document.createElement("div");
     actions.className = "message-actions";
@@ -121,10 +161,51 @@ function createMessageBubble(content, role = "user", { isError = false, isTyping
       try { await navigator.clipboard.writeText(content); copy.textContent = "복사됨"; setTimeout(() => { copy.textContent = "답변 복사"; }, 1300); }
       catch { setStatus("답변을 복사하지 못했습니다."); }
     });
-    actions.append(copy); contentBox.append(actions);
+    actions.append(copy);
+    if (requestId) {
+      const feedback = document.createElement("span");
+      feedback.className = "feedback-actions";
+      feedback.setAttribute("aria-label", "답변 평가");
+      [["up", "도움돼요", "👍"], ["down", "개선이 필요해요", "👎"]].forEach(([rating, label, icon]) => {
+        const button = document.createElement("button");
+        button.className = "feedback-button";
+        button.type = "button";
+        button.dataset.rating = rating;
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.textContent = icon;
+        if (feedbackRating) {
+          button.disabled = true;
+          button.classList.toggle("selected", feedbackRating === rating);
+        }
+        button.addEventListener("click", () => submitFeedback({ requestId, rating, mode, feedback }));
+        feedback.append(button);
+      });
+      actions.append(feedback);
+    }
+    contentBox.append(actions);
   }
   article.append(avatar, contentBox);
   return article;
+}
+
+async function submitFeedback({ requestId, rating, mode, feedback }) {
+  const buttons = [...feedback.querySelectorAll("button")];
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const response = await fetch(`${BASE_URL}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: requestId, rating, mode }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    buttons.forEach(button => button.classList.toggle("selected", button.dataset.rating === rating));
+    if (storageAvailable) await saveFeedbackRating(requestId, rating);
+    setStatus(rating === "up" ? "피드백 감사합니다." : "개선 의견으로 기록했습니다.");
+  } catch (error) {
+    buttons.forEach(button => { button.disabled = false; });
+    setStatus(error.message || "피드백을 저장하지 못했습니다.");
+  }
 }
 
 function updateEmptyState() { emptyState.hidden = chatContainer.childElementCount > 0; }
@@ -154,7 +235,7 @@ async function checkHealth() {
     if (!response.ok) throw new Error();
     serviceHealth = await response.json();
     apiStatusDot.className = "status-dot online"; apiStatusText.textContent = "API 연결됨";
-    paintCapability(ragStatus, serviceHealth.rag_ready); paintCapability(assistantStatus, serviceHealth.assistant_ready);
+    paintCapability(ragStatus, serviceHealth.rag_ready); paintCapability(assistantStatus, serviceHealth.assistant_ready); paintCapability(feedbackStatus, serviceHealth.feedback_ready);
     modeButtons.forEach(button => {
       const ready = button.dataset.mode === "rag" ? serviceHealth.rag_ready : serviceHealth.assistant_ready;
       button.disabled = isSending || !ready;
@@ -165,7 +246,7 @@ async function checkHealth() {
     }
   } catch {
     serviceHealth = null; apiStatusDot.className = "status-dot offline"; apiStatusText.textContent = "API에 연결할 수 없음";
-    ragStatus.textContent = "연결 실패"; ragStatus.className = "offline"; assistantStatus.textContent = "연결 실패"; assistantStatus.className = "offline";
+    ragStatus.textContent = "연결 실패"; ragStatus.className = "offline"; assistantStatus.textContent = "연결 실패"; assistantStatus.className = "offline"; feedbackStatus.textContent = "연결 실패"; feedbackStatus.className = "offline";
     modeButtons.forEach(button => { button.disabled = isSending; });
   } finally { refreshHealthBtn.classList.remove("spinning"); }
 }
@@ -182,7 +263,7 @@ async function getResponse(message) {
     if (!response.ok) throw new Error(await readError(response));
     const data = await response.json();
     if (activeMode === "assistant" && data.thread_id && storageAvailable) await saveMetadata("assistant_thread_id", data.thread_id);
-    return data.reply;
+    return data;
   } finally { window.clearTimeout(timeoutId); }
 }
 
@@ -195,8 +276,8 @@ async function sendMessage(text = userInput.value.trim()) {
   try {
     if (storageAvailable) await saveMessage("user", message, sentMode);
     typing = createMessageBubble("", "assistant", { isTyping:true }); chatContainer.append(typing); scrollToBottom();
-    const response = await getResponse(message); typing.remove(); chatContainer.append(createMessageBubble(response, "assistant", { mode: sentMode }));
-    if (storageAvailable) await saveMessage("assistant", response, sentMode);
+    const response = await getResponse(message); typing.remove(); chatContainer.append(createMessageBubble(response.reply, "assistant", { mode: sentMode, sources: response.sources || [], requestId: response.request_id }));
+    if (storageAvailable) await saveMessage("assistant", response.reply, sentMode, { sources: response.sources || [], requestId: response.request_id });
   } catch (error) {
     typing?.remove(); const errorText = error.name === "AbortError" ? "응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요." : error.message || "답변을 가져오지 못했습니다.";
     chatContainer.append(createMessageBubble(errorText, "assistant", { isError:true }));
@@ -221,7 +302,7 @@ async function initialize() {
     const savedMode = await getMetadata("active_mode"); if (savedMode && MODE_COPY[savedMode]) applyMode(savedMode, false);
     const messages = await getAllMessages();
     const fragment = document.createDocumentFragment();
-    messages.forEach(message => fragment.append(createMessageBubble(message.content, message.role, { createdAt:message.createdAt, mode:message.mode || "rag" })));
+    messages.forEach(message => fragment.append(createMessageBubble(message.content, message.role, { createdAt:message.createdAt, mode:message.mode || "rag", sources:message.sources || [], requestId:message.requestId, feedbackRating:message.feedbackRating })));
     chatContainer.append(fragment); updateEmptyState(); scrollToBottom();
   } catch { storageAvailable = false; setStatus("이 브라우저에서는 대화 기록이 저장되지 않습니다."); }
   checkHealth(); autoResize();

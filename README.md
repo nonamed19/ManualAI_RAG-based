@@ -78,6 +78,10 @@ $ npm start
 `OPENAI_API_KEY`, `ASSISTANT_BOT_ID`를 추가하면 됩니다. 프런트엔드의 API 주소는
 `frontend/.env`의 `API_ENDPOINT=http://127.0.0.1:8000`으로 설정할 수 있습니다.
 
+답변 피드백은 기본적으로 `backend/data/feedback.jsonl`에 JSON Lines 형식으로 저장됩니다.
+다른 위치를 사용하려면 백엔드 환경 변수 `FEEDBACK_LOG_PATH`를 설정하세요. 이 파일은
+운영 사용 신호를 담으므로 Git에서 제외됩니다.
+
 ## 기술 스택
 
 ### Environment
@@ -120,6 +124,15 @@ $ npm start
 - IndexedDB 기반 대화 저장 및 로컬 기록 관리
 - OpenAI Assistant API 및 LangChain 기반 MMR 검색 기능 제공
 - Pinecone 벡터 저장소를 활용한 유사도 검색
+- RAG 답변마다 매뉴얼 출처·페이지·원문 미리보기 제공
+- 좋아요/개선 필요 피드백을 JSONL로 수집하여 답변 품질 평가에 활용
+
+### API 응답 확장
+
+`POST /chat`은 기존의 `reply` 외에 `request_id`와 최대 3개의 `sources`를 반환합니다.
+각 출처는 매뉴얼 이름, 페이지, 짧은 원문 발췌를 포함합니다. `POST /feedback`에는
+`request_id`, `rating`(`up` 또는 `down`), `mode`를 전달해 답변 품질 신호를 기록할 수
+있습니다. 답변 본문과 사용자 질문은 피드백 파일에 저장하지 않습니다.
 
 ## 아키텍쳐
 

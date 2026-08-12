@@ -1,9 +1,13 @@
 import asyncio
+import json
 import logging
 import os
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import Lock
 from typing import Literal, Optional
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -19,8 +23,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 VECTORSTORE_DIR = BASE_DIR / "data" / "vectorstore"
+FEEDBACK_LOG_PATH = Path(os.getenv("FEEDBACK_LOG_PATH", str(BASE_DIR / "data" / "feedback.jsonl")))
 MAX_MESSAGE_LENGTH = 4_000
 MAX_CONCURRENT_REQUESTS = max(1, int(os.getenv("MAX_CONCURRENT_REQUESTS", "4")))
+MAX_FEEDBACK_COMMENT_LENGTH = 1_000
+feedback_file_lock = Lock()
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 openai_client = AsyncOpenAI(api_key=openai_api_key) if openai_api_key else None
@@ -52,7 +59,7 @@ def build_qa_chain() -> RetrievalQA:
         llm=chat_upstage,
         chain_type="stuff",
         retriever=retriever,
-        return_source_documents=False,
+        return_source_documents=True,
     )
 
 
@@ -73,7 +80,7 @@ async def lifespan(app: FastAPI):
         await openai_client.close()
 
 
-app = FastAPI(title="Product Manual Chatbot API", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="Product Manual Chatbot API", version="1.2.0", lifespan=lifespan)
 
 allowed_origins = [
     origin.strip()
@@ -123,6 +130,63 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     thread_id: Optional[str] = None
+    request_id: str
+    sources: list["SourceCitation"] = Field(default_factory=list)
+
+
+class SourceCitation(BaseModel):
+    title: str
+    page: Optional[int] = None
+    excerpt: Optional[str] = None
+
+
+class FeedbackRequest(BaseModel):
+    """A lightweight quality signal that can be used for RAG evaluation later."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    request_id: str = Field(min_length=1, max_length=128)
+    rating: Literal["up", "down"]
+    mode: Literal["rag", "assistant"]
+    comment: Optional[str] = Field(default=None, max_length=MAX_FEEDBACK_COMMENT_LENGTH)
+
+
+class FeedbackResponse(BaseModel):
+    saved: bool
+
+
+def make_source_citations(documents) -> list[SourceCitation]:
+    """Turn LangChain documents into safe, compact UI-facing citations."""
+    citations: list[SourceCitation] = []
+    seen: set[tuple[str, Optional[int], str]] = set()
+
+    for document in documents or []:
+        metadata = document.metadata or {}
+        source = str(metadata.get("source") or metadata.get("file_name") or "제품 매뉴얼")
+        title = Path(source).stem.replace("_", " ") or "제품 매뉴얼"
+        raw_page = metadata.get("page")
+        if raw_page is None:
+            raw_page = metadata.get("page_number")
+        try:
+            page = int(raw_page) + 1 if raw_page is not None else None
+        except (TypeError, ValueError):
+            page = None
+
+        excerpt = " ".join((document.page_content or "").split())[:240]
+        key = (title, page, excerpt)
+        if not excerpt or key in seen:
+            continue
+        seen.add(key)
+        citations.append(SourceCitation(title=title, page=page, excerpt=excerpt))
+
+    return citations[:3]
+
+
+def append_feedback(payload: dict) -> None:
+    """Append feedback atomically enough for a single-process deployment."""
+    FEEDBACK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with feedback_file_lock, FEEDBACK_LOG_PATH.open("a", encoding="utf-8") as feedback_file:
+        feedback_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def get_assistant_text(messages) -> str:
@@ -153,7 +217,14 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> ChatResponse:
         logger.exception("RAG response generation failed")
         raise HTTPException(status_code=502, detail="The answer service is temporarily unavailable.")
 
-    return ChatResponse(reply=result.get("result", ""))
+    reply = result.get("result", "")
+    if not reply:
+        raise HTTPException(status_code=502, detail="The answer service returned an empty response.")
+    return ChatResponse(
+        reply=reply,
+        request_id=str(uuid4()),
+        sources=make_source_citations(result.get("source_documents")),
+    )
 
 
 @app.post("/assistant", response_model=ChatResponse)
@@ -192,7 +263,25 @@ async def assistant_endpoint(req: AssistantRequest, request: Request) -> ChatRes
     reply = get_assistant_text(messages)
     if not reply:
         raise HTTPException(status_code=502, detail="The assistant returned an empty response.")
-    return ChatResponse(reply=reply, thread_id=thread_id)
+    return ChatResponse(reply=reply, thread_id=thread_id, request_id=str(uuid4()))
+
+
+@app.post("/feedback", response_model=FeedbackResponse, status_code=201)
+async def feedback_endpoint(req: FeedbackRequest) -> FeedbackResponse:
+    """Store an optional, privacy-conscious answer-quality signal as JSON Lines."""
+    payload = {
+        "request_id": req.request_id,
+        "rating": req.rating,
+        "mode": req.mode,
+        "comment": req.comment or None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await asyncio.to_thread(append_feedback, payload)
+    except OSError:
+        logger.exception("Could not save answer feedback")
+        raise HTTPException(status_code=503, detail="Feedback service is temporarily unavailable.")
+    return FeedbackResponse(saved=True)
 
 
 @app.get("/health")
@@ -202,4 +291,6 @@ async def health_check(request: Request):
         "status": "ok",
         "rag_ready": request.app.state.qa_chain is not None,
         "assistant_ready": bool(openai_client and assistant_bot_id),
+        "feedback_ready": True,
+        "api_version": app.version,
     }
