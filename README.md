@@ -60,7 +60,7 @@ $ cd backend
 $ python -m venv venv
 $ source venv/bin/activate
 $ pip install -r requirements.txt
-# 최초 1회: PDF를 로컬 FAISS 인덱스로 생성
+# 선택 사항: 명령줄에서 PDF를 로컬 FAISS 인덱스로 생성
 $ python -m app.embed
 # 개발 서버 실행
 $ python main.py
@@ -77,6 +77,11 @@ $ npm start
 `backend/.env`에는 `UPSTAGE_API_KEY`가 필요합니다. Assistant 모드를 사용할 때만
 `OPENAI_API_KEY`, `ASSISTANT_BOT_ID`를 추가하면 됩니다. 프런트엔드의 API 주소는
 `frontend/.env`의 `API_ENDPOINT=http://127.0.0.1:8000`으로 설정할 수 있습니다.
+
+백엔드를 실행한 뒤 프런트엔드 상단의 **인덱스 생성** 버튼을 누르면
+`backend/data/Galaxy_A_35.pdf`로 FAISS 벡터 스토어를 생성할 수 있습니다. 작업 진행 상태는
+화면에서 자동으로 갱신되며, 성공한 인덱스만 기존 검색 인덱스와 교체됩니다. 이 기능은
+Upstage 임베딩을 사용하므로 `UPSTAGE_API_KEY`가 반드시 필요합니다.
 
 답변 피드백은 기본적으로 `backend/data/feedback.jsonl`에 JSON Lines 형식으로 저장됩니다.
 다른 위치를 사용하려면 백엔드 환경 변수 `FEEDBACK_LOG_PATH`를 설정하세요. 이 파일은

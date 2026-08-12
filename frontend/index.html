@@ -64,10 +64,16 @@
               <span><strong>AI Assistant</strong><small>맥락을 이해하는 지원</small></span>
             </button>
           </div>
-          <button id="new-chat-btn" class="new-chat-button" type="button">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            <span>새 대화</span>
-          </button>
+          <div class="topbar-actions">
+            <button id="rebuild-vectorstore-btn" class="new-chat-button rebuild-vectorstore-button" type="button" title="매뉴얼 PDF로 벡터 스토어를 다시 생성합니다">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v18M5 7h14M5 17h14M7 3v18M17 3v18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              <span>인덱스 생성</span>
+            </button>
+            <button id="new-chat-btn" class="new-chat-button" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <span>새 대화</span>
+            </button>
+          </div>
         </header>
 
         <section class="conversation" aria-label="대화 영역">

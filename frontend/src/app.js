@@ -5,6 +5,7 @@ const messageForm = document.getElementById("message-form");
 const userInput = document.getElementById("user-input");
 const modeButtons = [...document.querySelectorAll(".mode-button")];
 const newChatBtn = document.getElementById("new-chat-btn");
+const rebuildVectorstoreBtn = document.getElementById("rebuild-vectorstore-btn");
 const sendButton = document.getElementById("send-btn");
 const statusMessage = document.getElementById("status-message");
 const refreshHealthBtn = document.getElementById("refresh-health-btn");
@@ -30,6 +31,8 @@ let isSending = false;
 let storageAvailable = true;
 let activeMode = "rag";
 let serviceHealth = null;
+let isRebuildingVectorstore = false;
+let vectorstorePollTimer = null;
 
 function initDB() {
   return new Promise((resolve, reject) => {
@@ -215,6 +218,7 @@ function setSending(nextValue) {
   userInput.disabled = nextValue;
   newChatBtn.disabled = nextValue;
   modeButtons.forEach(button => { button.disabled = nextValue; });
+  rebuildVectorstoreBtn.disabled = nextValue || isRebuildingVectorstore;
 }
 function applyMode(mode, persist = true) {
   activeMode = mode;
@@ -225,6 +229,56 @@ function applyMode(mode, persist = true) {
 }
 
 async function readError(response) { try { const body = await response.json(); return body.detail || body.error || `요청에 실패했습니다 (${response.status}).`; } catch { return `요청에 실패했습니다 (${response.status}).`; } }
+function setVectorstoreRebuildState(rebuilding) {
+  isRebuildingVectorstore = rebuilding;
+  rebuildVectorstoreBtn.disabled = rebuilding || isSending;
+  rebuildVectorstoreBtn.classList.toggle("building", rebuilding);
+  rebuildVectorstoreBtn.querySelector("span").textContent = rebuilding ? "생성 중" : "인덱스 생성";
+}
+function renderVectorstoreBuildStatus(build) {
+  if (build.status === "running") {
+    setVectorstoreRebuildState(true);
+    setStatus(build.detail || "매뉴얼을 읽고 벡터 스토어를 생성하고 있습니다…", true);
+    return true;
+  }
+  setVectorstoreRebuildState(false);
+  if (build.status === "completed") {
+    const chunkInfo = build.chunk_count ? ` (${build.chunk_count}개 청크)` : "";
+    setStatus(`벡터 스토어 생성이 완료되었습니다${chunkInfo}.`);
+    checkHealth();
+  } else if (build.status === "failed") {
+    setStatus(build.detail || "벡터 스토어 생성에 실패했습니다.");
+  }
+  return false;
+}
+async function pollVectorstoreBuild() {
+  window.clearTimeout(vectorstorePollTimer);
+  try {
+    const response = await fetch(`${BASE_URL}/vectorstore/rebuild`);
+    if (!response.ok) throw new Error(await readError(response));
+    const build = await response.json();
+    if (renderVectorstoreBuildStatus(build)) vectorstorePollTimer = window.setTimeout(pollVectorstoreBuild, 2_000);
+  } catch (error) {
+    setVectorstoreRebuildState(false);
+    setStatus(error.message || "벡터 스토어 작업 상태를 확인하지 못했습니다.");
+  }
+}
+async function startVectorstoreBuild() {
+  if (isSending || isRebuildingVectorstore) return;
+  const confirmed = window.confirm("현재 매뉴얼 PDF로 벡터 스토어를 다시 생성할까요? 완료되면 새 인덱스가 즉시 매뉴얼 검색에 적용됩니다.");
+  if (!confirmed) return;
+  setVectorstoreRebuildState(true);
+  setStatus("벡터 스토어 생성을 시작하고 있습니다…", true);
+  try {
+    const response = await fetch(`${BASE_URL}/vectorstore/rebuild`, { method: "POST" });
+    if (!response.ok) throw new Error(await readError(response));
+    renderVectorstoreBuildStatus(await response.json());
+    vectorstorePollTimer = window.setTimeout(pollVectorstoreBuild, 1_000);
+  } catch (error) {
+    setVectorstoreRebuildState(false);
+    setStatus(error.message || "벡터 스토어 생성을 시작하지 못했습니다.");
+  }
+}
 function paintCapability(element, ready) { element.textContent = ready ? "사용 가능" : "준비 안 됨"; element.className = ready ? "online" : "offline"; }
 async function checkHealth() {
   refreshHealthBtn.classList.add("spinning");
@@ -290,6 +344,7 @@ userInput.addEventListener("keydown", event => { if (event.key === "Enter" && !e
 modeButtons.forEach(button => button.addEventListener("click", () => applyMode(button.dataset.mode)));
 document.getElementById("suggestion-grid").addEventListener("click", event => { const button = event.target.closest("[data-prompt]"); if (button) sendMessage(button.dataset.prompt); });
 refreshHealthBtn.addEventListener("click", checkHealth);
+rebuildVectorstoreBtn.addEventListener("click", startVectorstoreBuild);
 newChatBtn.addEventListener("click", async () => {
   if (isSending) return;
   if (storageAvailable) { try { await clearAllData(); await saveMetadata("active_mode", activeMode); } catch { storageAvailable = false; } }
@@ -305,6 +360,6 @@ async function initialize() {
     messages.forEach(message => fragment.append(createMessageBubble(message.content, message.role, { createdAt:message.createdAt, mode:message.mode || "rag", sources:message.sources || [], requestId:message.requestId, feedbackRating:message.feedbackRating })));
     chatContainer.append(fragment); updateEmptyState(); scrollToBottom();
   } catch { storageAvailable = false; setStatus("이 브라우저에서는 대화 기록이 저장되지 않습니다."); }
-  checkHealth(); autoResize();
+  checkHealth(); pollVectorstoreBuild(); autoResize();
 }
 initialize();

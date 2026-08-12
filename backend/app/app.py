@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Literal, Optional
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chains import RetrievalQA
 from langchain_community.vectorstores import FAISS
@@ -18,27 +19,29 @@ from langchain_upstage import ChatUpstage, UpstageEmbeddings
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
+from .embed import DATA_DIR, PDF_PATH, VECTORSTORE_DIR, create_vectorstore
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
-VECTORSTORE_DIR = BASE_DIR / "data" / "vectorstore"
 FEEDBACK_LOG_PATH = Path(os.getenv("FEEDBACK_LOG_PATH", str(BASE_DIR / "data" / "feedback.jsonl")))
 MAX_MESSAGE_LENGTH = 4_000
 MAX_CONCURRENT_REQUESTS = max(1, int(os.getenv("MAX_CONCURRENT_REQUESTS", "4")))
 MAX_FEEDBACK_COMMENT_LENGTH = 1_000
 feedback_file_lock = Lock()
+vectorstore_job_lock = Lock()
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 openai_client = AsyncOpenAI(api_key=openai_api_key) if openai_api_key else None
 assistant_bot_id = os.getenv("ASSISTANT_BOT_ID")
 
 
-def build_qa_chain() -> RetrievalQA:
+def build_qa_chain(vectorstore_dir: Path = VECTORSTORE_DIR) -> RetrievalQA:
     """Load the local index once, rather than for every chat request."""
-    if not VECTORSTORE_DIR.exists():
+    if not vectorstore_dir.exists():
         raise FileNotFoundError(
-            f"Vector store not found at '{VECTORSTORE_DIR}'. Run backend/app/embed.py first."
+            f"Vector store not found at '{vectorstore_dir}'. Create it from the frontend or run backend/app/embed.py."
         )
 
     # Keep provider initialization here so /health and Assistant mode can boot even
@@ -46,7 +49,7 @@ def build_qa_chain() -> RetrievalQA:
     embedding_upstage = UpstageEmbeddings(model="embedding-query")
     chat_upstage = ChatUpstage()
     vectorstore = FAISS.load_local(
-        str(VECTORSTORE_DIR),
+        str(vectorstore_dir),
         embedding_upstage,
         # The index is created locally by embed.py and must be a trusted file.
         allow_dangerous_deserialization=True,
@@ -67,6 +70,7 @@ def build_qa_chain() -> RetrievalQA:
 async def lifespan(app: FastAPI):
     app.state.qa_chain = None
     app.state.request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+    app.state.vectorstore_job = {"status": "idle"}
     try:
         # FAISS loading is disk-bound; do not delay the event loop while starting.
         app.state.qa_chain = await asyncio.to_thread(build_qa_chain)
@@ -153,6 +157,68 @@ class FeedbackRequest(BaseModel):
 
 class FeedbackResponse(BaseModel):
     saved: bool
+
+
+class VectorstoreBuildResponse(BaseModel):
+    status: Literal["idle", "running", "completed", "failed"]
+    run_id: Optional[str] = None
+    source_file: Optional[str] = None
+    document_count: Optional[int] = None
+    chunk_count: Optional[int] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    detail: Optional[str] = None
+
+
+def vectorstore_build_status(app: FastAPI) -> dict:
+    with vectorstore_job_lock:
+        return dict(app.state.vectorstore_job)
+
+
+def update_vectorstore_build_status(app: FastAPI, **values) -> None:
+    with vectorstore_job_lock:
+        app.state.vectorstore_job = {**app.state.vectorstore_job, **values}
+
+
+def rebuild_vectorstore(app: FastAPI, run_id: str) -> None:
+    """Build off-line, then swap in a fully validated index for live RAG requests."""
+    staging_dir = DATA_DIR / f".vectorstore-build-{run_id}"
+    backup_dir = DATA_DIR / f".vectorstore-backup-{run_id}"
+    activated = False
+    try:
+        result = create_vectorstore(pdf_path=PDF_PATH, vectorstore_dir=staging_dir)
+        new_qa_chain = build_qa_chain(staging_dir)
+
+        # Renames within the same directory are quick. Existing chat requests keep
+        # their old in-memory chain until the new one is ready.
+        if VECTORSTORE_DIR.exists():
+            VECTORSTORE_DIR.replace(backup_dir)
+        staging_dir.replace(VECTORSTORE_DIR)
+        activated = True
+        app.state.qa_chain = new_qa_chain
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        update_vectorstore_build_status(
+            app,
+            status="completed",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            detail="새 벡터 스토어를 RAG 검색에 적용했습니다.",
+            **result,
+        )
+    except Exception:
+        logger.exception("Vector store rebuild failed")
+        # If activation did not complete, make the previous index available again.
+        if not activated and backup_dir.exists() and not VECTORSTORE_DIR.exists():
+            backup_dir.replace(VECTORSTORE_DIR)
+        update_vectorstore_build_status(
+            app,
+            status="failed",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            detail="벡터 스토어 생성에 실패했습니다. 서버 로그와 UPSTAGE_API_KEY를 확인해 주세요.",
+        )
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        if backup_dir.exists() and VECTORSTORE_DIR.exists():
+            shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def make_source_citations(documents) -> list[SourceCitation]:
@@ -282,6 +348,31 @@ async def feedback_endpoint(req: FeedbackRequest) -> FeedbackResponse:
         logger.exception("Could not save answer feedback")
         raise HTTPException(status_code=503, detail="Feedback service is temporarily unavailable.")
     return FeedbackResponse(saved=True)
+
+
+@app.get("/vectorstore/rebuild", response_model=VectorstoreBuildResponse)
+async def vectorstore_rebuild_status(request: Request) -> VectorstoreBuildResponse:
+    """Expose progress for the frontend's polling UI."""
+    return VectorstoreBuildResponse(**vectorstore_build_status(request.app))
+
+
+@app.post("/vectorstore/rebuild", response_model=VectorstoreBuildResponse, status_code=202)
+async def start_vectorstore_rebuild(request: Request, background_tasks: BackgroundTasks) -> VectorstoreBuildResponse:
+    """Start rebuilding the fixed local manual index without blocking the API."""
+    with vectorstore_job_lock:
+        current_status = request.app.state.vectorstore_job.get("status")
+        if current_status == "running":
+            raise HTTPException(status_code=409, detail="벡터 스토어 생성 작업이 이미 진행 중입니다.")
+        run_id = str(uuid4())
+        request.app.state.vectorstore_job = {
+            "status": "running",
+            "run_id": run_id,
+            "source_file": PDF_PATH.name,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "detail": "매뉴얼을 읽고 임베딩을 생성하고 있습니다.",
+        }
+    background_tasks.add_task(rebuild_vectorstore, request.app, run_id)
+    return VectorstoreBuildResponse(**vectorstore_build_status(request.app))
 
 
 @app.get("/health")
