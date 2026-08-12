@@ -2,8 +2,8 @@
   "name": "ssafy-2024-frontend",
   "version": "1.0.0",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "rm -rf dist .parcel-cache && parcel serve index.html",
+    "test": "npm run build",
+    "start": "parcel serve index.html",
     "build": "rimraf dist .parcel-cache && cross-env NODE_ENV=production parcel build index.html --public-url .",
     "deploy": "gh-pages -d dist"
   },
@@ -20,6 +20,5 @@
     "rimraf": "^6.0.1",
     "tailwindcss": "^3.4.16"
   },
-  "homepage": "https://kimsz123456.github.io/ssafy-2024-frontend/",
-  "deploy": "gh-pages -d dist"
+  "homepage": "https://kimsz123456.github.io/ssafy-2024-frontend/"
 }

@@ -38,8 +38,8 @@ Backend 서버: `https://ssafy-2024-backend-dry-star-6304.fly.dev`<br>
 For building and running the application you need:
 
 ```
-- Python 3.9.13
-- Node.js LTS (16+)
+- Python 3.9+
+- Node.js LTS (20+)
 - FastAPI
 - OpenAI API Key
 - Pinecone API Key
@@ -60,7 +60,10 @@ $ cd backend
 $ python -m venv venv
 $ source venv/bin/activate
 $ pip install -r requirements.txt
-$ uvicorn app:app --reload
+# 최초 1회: PDF를 로컬 FAISS 인덱스로 생성
+$ python -m app.embed
+# 개발 서버 실행
+$ python main.py
 ```
 
 #### Frontend
@@ -68,8 +71,12 @@ $ uvicorn app:app --reload
 ```bash
 $ cd ../frontend
 $ npm install
-$ npm run dev
+$ npm start
 ```
+
+`backend/.env`에는 `UPSTAGE_API_KEY`가 필요합니다. Assistant 모드를 사용할 때만
+`OPENAI_API_KEY`, `ASSISTANT_BOT_ID`를 추가하면 됩니다. 프런트엔드의 API 주소는
+`frontend/.env`의 `API_ENDPOINT=http://127.0.0.1:8000`으로 설정할 수 있습니다.
 
 ## 기술 스택
 

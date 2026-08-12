@@ -1,44 +1,37 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ChatGPT-like App</title>
-    <link rel="stylesheet" href="/index.4d663569.css">
-</head>
-
-<body class="h-screen flex flex-col bg-gray-100">
-    <!-- Header -->
-    <header class="p-4 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-between">
-        <div class="flex items-center space-x-4">
-            <h1 class="text-xl font-semibold">ChatGPT-like Interface</h1>
-            <button id="new-chat-btn" class="bg-white text-gray-700 px-3 py-1 rounded hover:bg-gray-200 transition">+
-                New Chat</button>
-        </div>
-        <span class="text-sm opacity-90">Powered by Parcel & Tailwind</span>
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#6366f1" />
+    <title>제품 매뉴얼 챗봇</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body class="h-screen flex flex-col bg-gray-100">
+    <header class="p-4 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-between gap-4">
+      <div class="flex items-center gap-4 min-w-0">
+        <h1 class="text-xl font-semibold truncate">제품 매뉴얼 챗봇</h1>
+        <button id="new-chat-btn" type="button" class="bg-white text-gray-700 px-3 py-1 rounded hover:bg-gray-200 disabled:opacity-60 transition">새 대화</button>
+      </div>
+      <span class="hidden sm:block text-sm opacity-90">RAG 기반 제품 안내</span>
     </header>
 
-    <!-- Main chat area -->
-    <main id="chat-container" class="flex-1 overflow-y-auto p-4 chat-scroll">
-        <!-- Messages will be dynamically inserted here -->
-    </main>
+    <main id="chat-container" class="flex-1 overflow-y-auto p-4 chat-scroll" aria-live="polite"></main>
 
-    <!-- Input area with endpoint selector -->
     <footer class="border-t border-gray-300 bg-white p-4">
-        <form id="message-form" class="flex items-center space-x-2">
-            <input type="text" id="user-input" class="flex-1 border border-gray-300 rounded-md p-2 outline-none focus:border-blue-500" placeholder="Type your message..." required="">
-            <select id="api-selector" class="border border-gray-300 rounded-md p-2">
-                <option value="naive" selected="">Naive (/chat)</option>
-                <option value="assistant">Assistant (/assistant)</option>
-            </select>
-            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">
-                Send
-            </button>
-        </form>
+      <p id="status-message" class="mb-2 min-h-5 text-sm text-gray-500" role="status"></p>
+      <form id="message-form" class="flex items-center gap-2">
+        <label class="sr-only" for="user-input">질문</label>
+        <input type="text" id="user-input" maxlength="4000" autocomplete="off" class="flex-1 min-w-0 border border-gray-300 rounded-md p-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200" placeholder="제품에 관해 질문해 주세요" required />
+        <label class="sr-only" for="api-selector">답변 방식</label>
+        <select id="api-selector" class="border border-gray-300 rounded-md p-2" aria-label="답변 방식">
+          <option value="naive" selected>매뉴얼 검색</option>
+          <option value="assistant">Assistant</option>
+        </select>
+        <button id="send-btn" type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition">Send</button>
+      </form>
     </footer>
 
-    <script src="/index.0641b553.js" defer=""></script>
-</body>
-
+    <script type="module" src="./src/app.js"></script>
+  </body>
 </html>
