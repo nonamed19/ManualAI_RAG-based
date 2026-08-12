@@ -1,31 +1,19 @@
-# =========================
-# Environment and Secrets
-# =========================
+# Secrets and local environment settings
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 
-# =========================
-# OS / Editor
-# =========================
-.DS_Store
-Thumbs.db
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
-!.vscode/tasks.json
-!.vscode/launch.json
-.history/
-
-# =========================
-# Python (backend)
-# =========================
+# Python backend: bytecode, tooling caches, and virtual environments
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -35,43 +23,41 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-backend/.venv/
-backend/venv/
-
-# Build outputs
+.ipynb_checkpoints/
+*.egg-info/
 build/
 dist/
 site/
 
-# =========================
-# Node / frontend
-# =========================
+# Frontend (Parcel / npm) dependencies and generated bundles
 frontend/node_modules/
 frontend/.parcel-cache/
-frontend/dist/
 frontend/.cache/
+frontend/dist/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
 
-# =========================
-# Project runtime artifacts
-# =========================
-backend/data/vectorstore/
-backend/data/feedback.jsonl
+# RAG runtime data: source manuals, generated FAISS indexes, and feedback logs
 backend/data/*.pdf
+backend/data/vectorstore/
+backend/data/.vectorstore-build-*/
+backend/data/.vectorstore-backup-*/
+backend/data/feedback.jsonl
+
+# Local working files and generated deliverables
 readimg/
 results/
 temp/
-
-# Optional local logs
 logs/
 *.log
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
