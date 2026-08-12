@@ -2,8 +2,8 @@
   "name": "ssafy-2024-frontend",
   "version": "1.0.0",
   "scripts": {
+    "dev": "parcel serve index.html",
     "test": "npm run build",
-    "start": "parcel serve index.html",
     "build": "rimraf dist .parcel-cache && cross-env NODE_ENV=production parcel build index.html --public-url .",
     "deploy": "gh-pages -d dist"
   },
