@@ -3,35 +3,100 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#6366f1" />
-    <title>제품 매뉴얼 챗봇</title>
+    <meta name="theme-color" content="#0b1220" />
+    <meta name="description" content="제품 매뉴얼과 AI Assistant를 한 곳에서 이용하는 제품 지원 챗봇" />
+    <title>Manual AI · 제품 지원</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
-  <body class="h-screen flex flex-col bg-gray-100">
-    <header class="p-4 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-between gap-4">
-      <div class="flex items-center gap-4 min-w-0">
-        <h1 class="text-xl font-semibold truncate">제품 매뉴얼 챗봇</h1>
-        <button id="new-chat-btn" type="button" class="bg-white text-gray-700 px-3 py-1 rounded hover:bg-gray-200 disabled:opacity-60 transition">새 대화</button>
-      </div>
-      <span class="hidden sm:block text-sm opacity-90">RAG 기반 제품 안내</span>
-    </header>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="서비스 정보">
+        <a class="brand" href="#top" aria-label="Manual AI 홈">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 5.75A2.75 2.75 0 0 1 7.75 3H19v15.25A2.75 2.75 0 0 0 16.25 15.5H5V5.75Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M5 15.5v2.75A2.75 2.75 0 0 0 7.75 21H19" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </span>
+          <span>Manual<span>AI</span></span>
+        </a>
 
-    <main id="chat-container" class="flex-1 overflow-y-auto p-4 chat-scroll" aria-live="polite"></main>
+        <div class="sidebar-copy">
+          <p class="eyebrow">PRODUCT SUPPORT</p>
+          <h1>제품을 더 잘 쓰는<br />가장 빠른 방법.</h1>
+          <p>매뉴얼에 근거한 답변부터 맥락을 이어가는 AI 지원까지 한 곳에서 확인하세요.</p>
+        </div>
 
-    <footer class="border-t border-gray-300 bg-white p-4">
-      <p id="status-message" class="mb-2 min-h-5 text-sm text-gray-500" role="status"></p>
-      <form id="message-form" class="flex items-center gap-2">
-        <label class="sr-only" for="user-input">질문</label>
-        <input type="text" id="user-input" maxlength="4000" autocomplete="off" class="flex-1 min-w-0 border border-gray-300 rounded-md p-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200" placeholder="제품에 관해 질문해 주세요" required />
-        <label class="sr-only" for="api-selector">답변 방식</label>
-        <select id="api-selector" class="border border-gray-300 rounded-md p-2" aria-label="답변 방식">
-          <option value="naive" selected>매뉴얼 검색</option>
-          <option value="assistant">Assistant</option>
-        </select>
-        <button id="send-btn" type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition">Send</button>
-      </form>
-    </footer>
+        <section class="service-card" aria-labelledby="service-status-title">
+          <div class="service-card-heading">
+            <div>
+              <p class="eyebrow">SYSTEM STATUS</p>
+              <h2 id="service-status-title">서비스 상태</h2>
+            </div>
+            <button id="refresh-health-btn" class="icon-button" type="button" aria-label="서비스 상태 새로고침" title="서비스 상태 새로고침">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M20 11a8.1 8.1 0 0 0-15.5-2.4L3 10m0-4.5V10h4.5M4 13a8.1 8.1 0 0 0 15.5 2.4L21 14m0 4.5V14h-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <div class="status-row">
+            <span id="api-status-dot" class="status-dot checking"></span>
+            <span id="api-status-text">연결 상태 확인 중</span>
+          </div>
+          <dl class="capability-list">
+            <div><dt>매뉴얼 검색</dt><dd id="rag-status" class="checking">확인 중</dd></div>
+            <div><dt>AI Assistant</dt><dd id="assistant-status" class="checking">확인 중</dd></div>
+          </dl>
+        </section>
 
+        <p class="privacy-note"><span>⌁</span> 대화는 이 브라우저에 안전하게 저장됩니다.</p>
+      </aside>
+
+      <main class="main-panel" id="top">
+        <header class="topbar">
+          <div class="mobile-brand">Manual<span>AI</span></div>
+          <div class="mode-selector" role="group" aria-label="답변 방식">
+            <button class="mode-button active" type="button" data-mode="rag" aria-pressed="true">
+              <span class="mode-icon">⌕</span>
+              <span><strong>매뉴얼 검색</strong><small>정확한 제품 안내</small></span>
+            </button>
+            <button class="mode-button" type="button" data-mode="assistant" aria-pressed="false">
+              <span class="mode-icon">✦</span>
+              <span><strong>AI Assistant</strong><small>맥락을 이해하는 지원</small></span>
+            </button>
+          </div>
+          <button id="new-chat-btn" class="new-chat-button" type="button">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>새 대화</span>
+          </button>
+        </header>
+
+        <section class="conversation" aria-label="대화 영역">
+          <div id="empty-state" class="empty-state">
+            <p class="eyebrow" id="welcome-eyebrow">MANUAL SEARCH</p>
+            <h2 id="welcome-title">무엇을 도와드릴까요?</h2>
+            <p id="welcome-description">제품 매뉴얼에서 필요한 내용을 찾아, 이해하기 쉬운 답변으로 정리해 드립니다.</p>
+            <div class="suggestion-grid" id="suggestion-grid">
+              <button type="button" class="suggestion" data-prompt="화면 밝기를 조절하려면 어떻게 하나요?"><span>01</span>화면 밝기 조절 방법</button>
+              <button type="button" class="suggestion" data-prompt="카메라의 야간 모드는 어떻게 사용하나요?"><span>02</span>카메라 야간 모드 사용법</button>
+              <button type="button" class="suggestion" data-prompt="배터리를 오래 사용하려면 어떻게 해야 하나요?"><span>03</span>배터리 절약 설정</button>
+              <button type="button" class="suggestion" data-prompt="기기에서 Wi-Fi에 연결하려면 어떻게 하나요?"><span>04</span>Wi-Fi 연결 방법</button>
+            </div>
+          </div>
+          <div id="chat-container" class="chat-container" aria-live="polite" aria-label="메시지"></div>
+        </section>
+
+        <footer class="composer-area">
+          <p id="status-message" class="request-status" role="status" aria-live="polite"></p>
+          <form id="message-form" class="message-form">
+            <label class="sr-only" for="user-input">질문 입력</label>
+            <textarea id="user-input" rows="1" maxlength="4000" autocomplete="off" placeholder="제품에 관해 질문해 주세요" required></textarea>
+            <button id="send-btn" class="send-button" type="submit" aria-label="메시지 보내기">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 14-7-4 14-3.5-5L5 12Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="m11.5 14 2.2-2.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            </button>
+          </form>
+          <p class="input-hint"><kbd>Enter</kbd> 전송 <span>·</span> <kbd>Shift + Enter</kbd> 줄바꿈</p>
+        </footer>
+      </main>
+    </div>
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>

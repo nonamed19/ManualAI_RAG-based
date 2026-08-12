@@ -1,39 +1,47 @@
 const chatContainer = document.getElementById("chat-container");
+const conversation = document.querySelector(".conversation");
+const emptyState = document.getElementById("empty-state");
 const messageForm = document.getElementById("message-form");
 const userInput = document.getElementById("user-input");
-const apiSelector = document.getElementById("api-selector");
+const modeButtons = [...document.querySelectorAll(".mode-button")];
 const newChatBtn = document.getElementById("new-chat-btn");
 const sendButton = document.getElementById("send-btn");
 const statusMessage = document.getElementById("status-message");
+const refreshHealthBtn = document.getElementById("refresh-health-btn");
+const apiStatusDot = document.getElementById("api-status-dot");
+const apiStatusText = document.getElementById("api-status-text");
+const ragStatus = document.getElementById("rag-status");
+const assistantStatus = document.getElementById("assistant-status");
+const welcomeEyebrow = document.getElementById("welcome-eyebrow");
+const welcomeTitle = document.getElementById("welcome-title");
+const welcomeDescription = document.getElementById("welcome-description");
 
 const BASE_URL = (process.env.API_ENDPOINT || "http://127.0.0.1:8000").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 90_000;
 const MAX_STORED_MESSAGES = 300;
+const MODE_COPY = {
+  rag: { eyebrow: "MANUAL SEARCH", title: "무엇을 도와드릴까요?", description: "제품 매뉴얼에서 필요한 내용을 찾아, 이해하기 쉬운 답변으로 정리해 드립니다.", placeholder: "제품에 관해 질문해 주세요" },
+  assistant: { eyebrow: "AI ASSISTANT", title: "맥락을 이어서 도와드릴게요.", description: "이전 대화를 기억하는 AI Assistant에게 제품 사용 경험 전반을 편하게 물어보세요.", placeholder: "Assistant에게 질문해 보세요" },
+};
 
 let db;
 let isSending = false;
 let storageAvailable = true;
+let activeMode = "rag";
+let serviceHealth = null;
 
 function initDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("myChatDB", 1);
+    const request = indexedDB.open("manualAiChatDB", 1);
     request.onupgradeneeded = ({ target }) => {
       db = target.result;
-      if (!db.objectStoreNames.contains("chats")) {
-        db.createObjectStore("chats", { keyPath: "id", autoIncrement: true });
-      }
-      if (!db.objectStoreNames.contains("metadata")) {
-        db.createObjectStore("metadata", { keyPath: "key" });
-      }
+      if (!db.objectStoreNames.contains("chats")) db.createObjectStore("chats", { keyPath: "id", autoIncrement: true });
+      if (!db.objectStoreNames.contains("metadata")) db.createObjectStore("metadata", { keyPath: "key" });
     };
-    request.onsuccess = ({ target }) => {
-      db = target.result;
-      resolve();
-    };
+    request.onsuccess = ({ target }) => { db = target.result; resolve(); };
     request.onerror = () => reject(request.error);
   });
 }
-
 const dbReady = initDB();
 
 function runTransaction(storeNames, mode, action) {
@@ -45,235 +53,177 @@ function runTransaction(storeNames, mode, action) {
     transaction.onabort = () => reject(transaction.error);
   });
 }
-
-async function saveMessage(role, content) {
-  await runTransaction("chats", "readwrite", (transaction) => {
-    const store = transaction.objectStore("chats");
-    store.add({ role, content, createdAt: Date.now() });
-    const countRequest = store.count();
-    countRequest.onsuccess = () => {
-      let excess = countRequest.result - MAX_STORED_MESSAGES;
-      if (excess <= 0) return;
-      const cursorRequest = store.openCursor();
-      cursorRequest.onsuccess = () => {
-        const cursor = cursorRequest.result;
-        if (!cursor || excess <= 0) return;
-        cursor.delete();
-        excess -= 1;
-        cursor.continue();
-      };
-    };
-  });
-}
-
-function getAllMessages() {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction("chats", "readonly");
-    const request = transaction.objectStore("chats").getAll();
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function saveMetadata(key, value) {
-  return runTransaction("metadata", "readwrite", (transaction) => {
-    transaction.objectStore("metadata").put({ key, value });
-  });
-}
-
+function saveMetadata(key, value) { return runTransaction("metadata", "readwrite", tx => tx.objectStore("metadata").put({ key, value })); }
 function getMetadata(key) {
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction("metadata", "readonly");
-    const request = transaction.objectStore("metadata").get(key);
+    const request = db.transaction("metadata", "readonly").objectStore("metadata").get(key);
     request.onsuccess = () => resolve(request.result?.value ?? null);
     request.onerror = () => reject(request.error);
   });
 }
-
-function clearAllData() {
-  return runTransaction(["chats", "metadata"], "readwrite", (transaction) => {
-    transaction.objectStore("chats").clear();
-    transaction.objectStore("metadata").clear();
+function saveMessage(role, content, mode) {
+  return runTransaction("chats", "readwrite", tx => {
+    const store = tx.objectStore("chats");
+    store.add({ role, content, mode, createdAt: Date.now() });
+    const countRequest = store.count();
+    countRequest.onsuccess = () => {
+      let excess = countRequest.result - MAX_STORED_MESSAGES;
+      if (excess < 1) return;
+      const cursorRequest = store.openCursor();
+      cursorRequest.onsuccess = () => { const cursor = cursorRequest.result; if (!cursor || excess < 1) return; cursor.delete(); excess -= 1; cursor.continue(); };
+    };
   });
 }
+function getAllMessages() {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("chats", "readonly").objectStore("chats").getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+function clearAllData() { return runTransaction(["chats", "metadata"], "readwrite", tx => { tx.objectStore("chats").clear(); tx.objectStore("metadata").clear(); }); }
 
-function createMessageBubble(content, sender = "user", isError = false) {
-  const wrapper = document.createElement("article");
-  wrapper.className = "mb-6 flex items-start space-x-3";
+function setStatus(message = "", loading = false) { statusMessage.textContent = message; statusMessage.classList.toggle("loading", loading); }
+function scrollToBottom() { requestAnimationFrame(() => { conversation.scrollTop = conversation.scrollHeight; }); }
+function autoResize() { userInput.style.height = "auto"; userInput.style.height = `${Math.min(userInput.scrollHeight, 144)}px`; }
+function formatTime(timestamp = Date.now()) { return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(timestamp); }
 
+function createMessageBubble(content, role = "user", { isError = false, isTyping = false, createdAt, mode = activeMode } = {}) {
+  const article = document.createElement("article");
+  article.className = `message ${role}${isError ? " error" : ""}${isTyping ? " typing" : ""}`;
   const avatar = document.createElement("div");
-  avatar.className = `w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-white ${
-    sender === "assistant"
-      ? "bg-gradient-to-br from-green-400 to-green-600"
-      : "bg-gradient-to-br from-blue-500 to-blue-700"
-  }`;
-  avatar.textContent = sender === "assistant" ? "A" : "U";
-
+  avatar.className = "avatar";
+  avatar.textContent = role === "assistant" ? "AI" : "ME";
+  const contentBox = document.createElement("div");
+  contentBox.className = "message-content";
+  const meta = document.createElement("div");
+  meta.className = "message-meta";
+  const name = document.createElement("span");
+  name.textContent = role === "assistant" ? (mode === "rag" ? "Manual AI" : "AI Assistant") : "나";
+  const time = document.createElement("time");
+  time.textContent = isTyping ? "답변 작성 중" : formatTime(createdAt);
+  meta.append(name, time);
   const bubble = document.createElement("div");
-  bubble.className = `max-w-full md:max-w-2xl p-3 rounded-lg whitespace-pre-wrap break-words leading-relaxed shadow-sm ${
-    sender === "assistant"
-      ? isError
-        ? "bg-red-50 text-red-800"
-        : "bg-gray-200 text-gray-900"
-      : "bg-blue-600 text-white"
-  }`;
-  // textContent keeps restored and remote text from being interpreted as HTML.
-  bubble.textContent = content;
-
-  wrapper.append(avatar, bubble);
-  return wrapper;
+  bubble.className = "bubble";
+  if (isTyping) {
+    bubble.classList.add("typing-bubble");
+    bubble.innerHTML = "<span></span><span></span><span></span>";
+  } else bubble.textContent = content;
+  contentBox.append(meta, bubble);
+  if (role === "assistant" && !isTyping && !isError) {
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+    const copy = document.createElement("button");
+    copy.className = "copy-button";
+    copy.type = "button";
+    copy.textContent = "답변 복사";
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(content); copy.textContent = "복사됨"; setTimeout(() => { copy.textContent = "답변 복사"; }, 1300); }
+      catch { setStatus("답변을 복사하지 못했습니다."); }
+    });
+    actions.append(copy); contentBox.append(actions);
+  }
+  article.append(avatar, contentBox);
+  return article;
 }
 
-function scrollToBottom() {
-  chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-
-function setStatus(message = "") {
-  statusMessage.textContent = message;
-}
-
+function updateEmptyState() { emptyState.hidden = chatContainer.childElementCount > 0; }
 function setSending(nextValue) {
   isSending = nextValue;
   sendButton.disabled = nextValue;
   userInput.disabled = nextValue;
-  apiSelector.disabled = nextValue;
   newChatBtn.disabled = nextValue;
-  sendButton.textContent = nextValue ? "Sending…" : "Send";
+  modeButtons.forEach(button => { button.disabled = nextValue; });
+}
+function applyMode(mode, persist = true) {
+  activeMode = mode;
+  const copy = MODE_COPY[mode];
+  welcomeEyebrow.textContent = copy.eyebrow; welcomeTitle.textContent = copy.title; welcomeDescription.textContent = copy.description; userInput.placeholder = copy.placeholder;
+  modeButtons.forEach(button => { const selected = button.dataset.mode === mode; button.classList.toggle("active", selected); button.setAttribute("aria-pressed", String(selected)); });
+  if (persist && storageAvailable) saveMetadata("active_mode", mode).catch(() => { storageAvailable = false; });
 }
 
-async function readError(response) {
+async function readError(response) { try { const body = await response.json(); return body.detail || body.error || `요청에 실패했습니다 (${response.status}).`; } catch { return `요청에 실패했습니다 (${response.status}).`; } }
+function paintCapability(element, ready) { element.textContent = ready ? "사용 가능" : "준비 안 됨"; element.className = ready ? "online" : "offline"; }
+async function checkHealth() {
+  refreshHealthBtn.classList.add("spinning");
+  apiStatusDot.className = "status-dot checking"; apiStatusText.textContent = "연결 상태 확인 중";
   try {
-    const body = await response.json();
-    return body.detail || body.error || `Request failed (${response.status}).`;
-  } catch {
-    return `Request failed (${response.status}).`;
-  }
-}
-
-async function getAssistantResponse(userMessage) {
-  const mode = apiSelector.value;
-  const url = `${BASE_URL}${mode === "assistant" ? "/assistant" : "/chat"}`;
-  const payload = mode === "assistant" ? { message: userMessage } : { message: userMessage };
-
-  if (mode === "assistant") {
-    let threadId = null;
-    if (storageAvailable) {
-      try {
-        threadId = await getMetadata("thread_id");
-      } catch (error) {
-        storageAvailable = false;
-        console.warn("Chat storage is unavailable:", error);
-      }
-    }
-    if (threadId) payload.thread_id = threadId;
-  }
-
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
+    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 7_000);
+    const response = await fetch(`${BASE_URL}/health`, { signal: controller.signal }); clearTimeout(timeout);
+    if (!response.ok) throw new Error();
+    serviceHealth = await response.json();
+    apiStatusDot.className = "status-dot online"; apiStatusText.textContent = "API 연결됨";
+    paintCapability(ragStatus, serviceHealth.rag_ready); paintCapability(assistantStatus, serviceHealth.assistant_ready);
+    modeButtons.forEach(button => {
+      const ready = button.dataset.mode === "rag" ? serviceHealth.rag_ready : serviceHealth.assistant_ready;
+      button.disabled = isSending || !ready;
     });
-    if (!response.ok) throw new Error(await readError(response));
-
-    const data = await response.json();
-    if (mode === "assistant" && data.thread_id) {
-      try {
-        await saveMetadata("thread_id", data.thread_id);
-      } catch (error) {
-        storageAvailable = false;
-        console.warn("Unable to save the Assistant thread:", error);
-      }
+    if (!(activeMode === "rag" ? serviceHealth.rag_ready : serviceHealth.assistant_ready)) {
+      const available = serviceHealth.rag_ready ? "rag" : serviceHealth.assistant_ready ? "assistant" : null;
+      if (available) applyMode(available);
     }
-    return data.reply;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
+  } catch {
+    serviceHealth = null; apiStatusDot.className = "status-dot offline"; apiStatusText.textContent = "API에 연결할 수 없음";
+    ragStatus.textContent = "연결 실패"; ragStatus.className = "offline"; assistantStatus.textContent = "연결 실패"; assistantStatus.className = "offline";
+    modeButtons.forEach(button => { button.disabled = isSending; });
+  } finally { refreshHealthBtn.classList.remove("spinning"); }
 }
 
-messageForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const message = userInput.value.trim();
-  if (!message || isSending) return;
-
-  try {
-    await dbReady;
-  } catch (error) {
-    storageAvailable = false;
-    console.error("Unable to open chat storage:", error);
+async function getResponse(message) {
+  const endpoint = activeMode === "assistant" ? "/assistant" : "/chat";
+  const payload = { message };
+  if (activeMode === "assistant" && storageAvailable) {
+    const threadId = await getMetadata("assistant_thread_id"); if (threadId) payload.thread_id = threadId;
   }
-
-  setSending(true);
-  setStatus("답변을 생성하고 있습니다…");
-  chatContainer.appendChild(createMessageBubble(message));
-  userInput.value = "";
-  scrollToBottom();
-
+  const controller = new AbortController(); const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    if (storageAvailable) {
-      try {
-        await saveMessage("user", message);
-      } catch (error) {
-        storageAvailable = false;
-        console.warn("Unable to save the user message:", error);
-      }
-    }
-    const response = await getAssistantResponse(message);
-    chatContainer.appendChild(createMessageBubble(response, "assistant"));
-    if (storageAvailable) {
-      try {
-        await saveMessage("assistant", response);
-      } catch (error) {
-        storageAvailable = false;
-        console.warn("Unable to save the assistant message:", error);
-      }
-    }
-  } catch (error) {
-    console.error("Error fetching assistant response:", error);
-    const message = error.name === "AbortError" ? "응답 시간이 초과되었습니다. 다시 시도해 주세요." : error.message;
-    chatContainer.appendChild(createMessageBubble(message, "assistant", true));
-  } finally {
-    setStatus("");
-    setSending(false);
-    userInput.focus();
-    scrollToBottom();
-  }
-});
+    const response = await fetch(`${BASE_URL}${endpoint}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload), signal:controller.signal });
+    if (!response.ok) throw new Error(await readError(response));
+    const data = await response.json();
+    if (activeMode === "assistant" && data.thread_id && storageAvailable) await saveMetadata("assistant_thread_id", data.thread_id);
+    return data.reply;
+  } finally { window.clearTimeout(timeoutId); }
+}
 
+async function sendMessage(text = userInput.value.trim()) {
+  const message = text.trim(); if (!message || isSending) return;
+  try { await dbReady; } catch { storageAvailable = false; }
+  const sentMode = activeMode; setSending(true); setStatus(`${sentMode === "rag" ? "매뉴얼을 검색" : "Assistant가 맥락을 확인"}하고 있습니다…`, true);
+  chatContainer.append(createMessageBubble(message, "user")); emptyState.hidden = true; userInput.value = ""; autoResize(); scrollToBottom();
+  let typing;
+  try {
+    if (storageAvailable) await saveMessage("user", message, sentMode);
+    typing = createMessageBubble("", "assistant", { isTyping:true }); chatContainer.append(typing); scrollToBottom();
+    const response = await getResponse(message); typing.remove(); chatContainer.append(createMessageBubble(response, "assistant", { mode: sentMode }));
+    if (storageAvailable) await saveMessage("assistant", response, sentMode);
+  } catch (error) {
+    typing?.remove(); const errorText = error.name === "AbortError" ? "응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요." : error.message || "답변을 가져오지 못했습니다.";
+    chatContainer.append(createMessageBubble(errorText, "assistant", { isError:true }));
+  } finally { setStatus(""); setSending(false); userInput.focus(); scrollToBottom(); }
+}
+
+messageForm.addEventListener("submit", event => { event.preventDefault(); sendMessage(); });
+userInput.addEventListener("input", autoResize);
+userInput.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); messageForm.requestSubmit(); } });
+modeButtons.forEach(button => button.addEventListener("click", () => applyMode(button.dataset.mode)));
+document.getElementById("suggestion-grid").addEventListener("click", event => { const button = event.target.closest("[data-prompt]"); if (button) sendMessage(button.dataset.prompt); });
+refreshHealthBtn.addEventListener("click", checkHealth);
 newChatBtn.addEventListener("click", async () => {
   if (isSending) return;
-  if (storageAvailable) {
-    try {
-      await dbReady;
-      await clearAllData();
-    } catch (error) {
-      storageAvailable = false;
-      console.warn("Unable to clear chat storage:", error);
-    }
-  }
-  chatContainer.replaceChildren();
-  setStatus("새 대화를 시작했습니다.");
-  userInput.focus();
+  if (storageAvailable) { try { await clearAllData(); await saveMetadata("active_mode", activeMode); } catch { storageAvailable = false; } }
+  chatContainer.replaceChildren(); updateEmptyState(); setStatus("새 대화를 시작했습니다."); userInput.focus();
 });
 
-async function loadExistingMessages() {
+async function initialize() {
   try {
     await dbReady;
+    const savedMode = await getMetadata("active_mode"); if (savedMode && MODE_COPY[savedMode]) applyMode(savedMode, false);
     const messages = await getAllMessages();
     const fragment = document.createDocumentFragment();
-    for (const message of messages) {
-      fragment.appendChild(createMessageBubble(message.content, message.role));
-    }
-    chatContainer.appendChild(fragment);
-    scrollToBottom();
-  } catch (error) {
-    storageAvailable = false;
-    console.error("Unable to restore chat history:", error);
-    setStatus("이전 대화를 불러오지 못했습니다.");
-  }
+    messages.forEach(message => fragment.append(createMessageBubble(message.content, message.role, { createdAt:message.createdAt, mode:message.mode || "rag" })));
+    chatContainer.append(fragment); updateEmptyState(); scrollToBottom();
+  } catch { storageAvailable = false; setStatus("이 브라우저에서는 대화 기록이 저장되지 않습니다."); }
+  checkHealth(); autoResize();
 }
-
-loadExistingMessages();
+initialize();
