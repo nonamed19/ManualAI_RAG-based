@@ -3,24 +3,140 @@ name: Dependabot Auto Merge
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
+  # Retry PRs waiting for a rebase, GitHub calculation, or a missed event.
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   auto-merge:
-    # 같은 저장소에서 Dependabot이 생성한 PR만 처리
     if: >-
-      github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.draft == false
-
-    runs-on: ubuntu-latest
-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.user.login == 'dependabot[bot]' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.draft == false)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    # Every scan includes all open Dependabot PRs, including replaced pending runs.
+    concurrency:
+      group: dependabot-auto-merge-${{ github.repository }}
+      cancel-in-progress: false
     steps:
-      - name: Enable auto-merge
-        run: gh pr merge "$PR_URL" --auto --squash
+      # No checkout: never execute PR code with this write token.
+      - name: Reconcile Dependabot auto-merge
+        shell: python {0}
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          import json
+          import os
+          import subprocess
+          import time
+          from pathlib import Path
+
+          REPO = os.environ['GH_REPO']
+
+          def gh(*args):
+              result = subprocess.run(
+                  ['gh', *args], capture_output=True, text=True, timeout=60
+              )
+              if result.returncode:
+                  raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+              return result.stdout
+
+          def api(path):
+              return json.loads(gh('api', f'repos/{REPO}/{path}'))
+
+          def eligible(pr):
+              return (
+                  pr['state'] == 'open'
+                  and not pr['draft']
+                  and pr['user']['login'] == 'dependabot[bot]'
+                  and (pr['head'].get('repo') or {}).get('full_name') == REPO
+                  and pr['base']['repo']['full_name'] == REPO
+              )
+
+          def waiting(pr):
+              if pr['mergeable'] is False or pr['mergeable_state'] == 'dirty':
+                  return 'Waiting for conflict resolution / Dependabot rebase'
+              if pr['mergeable'] is None or pr['mergeable_state'] == 'unknown':
+                  return 'Waiting for GitHub mergeability calculation'
+              return None
+
+          def reconcile(number):
+              # Queued events may refer to old heads or closed PRs: read live state.
+              for attempt in range(4):
+                  pr = api(f'pulls/{number}')
+                  if not eligible(pr):
+                      return 'Skipped: closed, draft, or outside the trusted scope'
+                  if pr.get('auto_merge'):
+                      return 'Auto-merge already enabled; repository rules still apply'
+                  if pr['mergeable'] is not None and pr['mergeable_state'] != 'unknown':
+                      break
+                  if attempt < 3:
+                      time.sleep(3)
+              reason = waiting(pr)
+              if reason:
+                  return reason
+              head = pr['head']['sha']
+              try:
+                  gh('pr', 'merge', str(number), '--repo', REPO, '--auto',
+                     '--squash', '--match-head-commit', head)
+              except RuntimeError:
+                  # Classify races using live state instead of error-string matching.
+                  current = api(f'pulls/{number}')
+                  if not eligible(current):
+                      return 'Skipped: PR closed or eligibility changed during merge'
+                  if current['head']['sha'] != head:
+                      return 'Waiting: head changed during merge; retry on next scan'
+                  reason = waiting(current)
+                  if reason:
+                      return reason
+                  if current.get('auto_merge'):
+                      return 'Auto-merge enabled by another run'
+                  raise  # Keep permission, policy, and configuration failures visible.
+              current = api(f'pulls/{number}')
+              if current.get('merged'):
+                  return 'Merged (squash)'
+              if current.get('auto_merge'):
+                  return 'Auto-merge enabled; waiting for repository requirements'
+              return 'Merge request accepted; check PR / merge queue for final status'
+
+          def main():
+              rows = []
+              failed = False
+              try:
+                  # Pagination avoids silently ignoring PRs beyond the first page.
+                  pages = json.loads(gh(
+                      'api', '--paginate', '--slurp',
+                      f'repos/{REPO}/pulls?state=open&per_page=100'
+                  ))
+                  numbers = sorted(pr['number'] for page in pages for pr in page
+                                   if eligible(pr))
+                  if not numbers:
+                      rows.append('| — | No eligible open Dependabot PRs |')
+                  for number in numbers:
+                      try:
+                          status = reconcile(number)
+                      except (RuntimeError, subprocess.TimeoutExpired) as error:
+                          failed = True
+                          status = f'ERROR: {error}'
+                      print(f'PR #{number}: {status}', flush=True)
+                      status = status.replace('|', '&#124;').replace('\n', ' ')
+                      rows.append(f'| #{number} | {status} |')
+              finally:
+                  with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8') as summary:
+                      summary.write('## Dependabot auto-merge\n\n| PR | Result |\n| --- | --- |\n')
+                      summary.write('\n'.join(rows) if rows else '| — | Discovery failed; see step log |')
+                      summary.write('\n')
+              if failed:
+                  raise SystemExit(1)
+
+          if __name__ == '__main__':
+              main()
