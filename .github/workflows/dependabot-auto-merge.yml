@@ -1,8 +1,6 @@
 name: Dependabot Auto Merge
 
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
   # Retry PRs waiting for a rebase, GitHub calculation, or a missed event.
   schedule:
     - cron: '23 */6 * * *'
@@ -12,11 +10,6 @@ permissions: {}
 
 jobs:
   auto-merge:
-    if: >-
-      github.event_name != 'pull_request_target' ||
-      (github.event.pull_request.user.login == 'dependabot[bot]' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
